@@ -251,7 +251,9 @@ local function sync_cursors(augroup, wins)
       buffer = b,
       group = augroup,
       callback = function()
-        cursor_save = unpack(api.nvim_win_get_cursor(w))
+        if api.nvim_win_is_valid(w) then
+          cursor_save = unpack(api.nvim_win_get_cursor(w))
+        end
       end,
     })
 
@@ -259,6 +261,9 @@ local function sync_cursors(augroup, wins)
       group = augroup,
       buffer = b,
       callback = function()
+        if not api.nvim_win_is_valid(w) then
+          return
+        end
         local cur_cursor, cur_cursor_col = unpack(api.nvim_win_get_cursor(w))
         if cursor_save and cursor_save ~= cur_cursor then
           api.nvim_win_set_cursor(w, { cursor_save, vim.o.startofline and 0 or cur_cursor_col })
@@ -432,7 +437,9 @@ M.blame = function(print_type)
     group = group,
     callback = function()
       api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
-      cur_wlo.foldenable, cur_wlo.scrollbind, cur_wlo.wrap = unpack(cur_orig_wlo)
+      if api.nvim_win_is_valid(win) then
+        cur_wlo.foldenable, cur_wlo.scrollbind, cur_wlo.wrap = unpack(cur_orig_wlo)
+      end
     end,
   })
 
