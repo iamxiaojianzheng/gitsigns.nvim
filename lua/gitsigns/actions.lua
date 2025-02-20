@@ -134,6 +134,7 @@ M.toggle_current_line_blame = function(value)
   return config.current_line_blame
 end
 
+--- @deprecated Use |gitsigns.preview_hunk_inline()|
 --- Toggle |gitsigns-config-show_deleted|
 ---
 --- @param value boolean|nil Value to set toggle. If `nil`
@@ -221,6 +222,7 @@ local function get_hunks(bufnr, bcache, greedy, staged)
   return vim.deepcopy(bcache.hunks)
 end
 
+--- @async
 --- @param bufnr integer
 --- @param range? {[1]: integer, [2]: integer}
 --- @param greedy? boolean
@@ -241,12 +243,35 @@ local function get_hunk(bufnr, range, greedy, staged)
   table.sort(range)
   local top, bot = range[1], range[2]
   local hunk = Hunks.create_partial_hunk(hunks or {}, top, bot)
-  hunk.added.lines = api.nvim_buf_get_lines(bufnr, top - 1, bot, false)
-  hunk.removed.lines = vim.list_slice(
-    bcache.compare_text,
-    hunk.removed.start,
-    hunk.removed.start + hunk.removed.count - 1
-  )
+  if not hunk then
+    return
+  end
+
+  if staged then
+    local staged_top, staged_bot = top, bot
+    for _, h in ipairs(bcache.hunks) do
+      if top > h.vend then
+        staged_top = staged_top - (h.added.count - h.removed.count)
+      end
+      if bot > h.vend then
+        staged_bot = staged_bot - (h.added.count - h.removed.count)
+      end
+    end
+
+    hunk.added.lines = vim.list_slice(bcache.compare_text, staged_top, staged_bot)
+    hunk.removed.lines = vim.list_slice(
+      bcache.compare_text_head,
+      hunk.removed.start,
+      hunk.removed.start + hunk.removed.count - 1
+    )
+  else
+    hunk.added.lines = api.nvim_buf_get_lines(bufnr, top - 1, bot, false)
+    hunk.removed.lines = vim.list_slice(
+      bcache.compare_text,
+      hunk.removed.start,
+      hunk.removed.start + hunk.removed.count - 1
+    )
+  end
   return hunk
 end
 
@@ -393,6 +418,7 @@ M.reset_buffer = function()
   end
 end
 
+--- @deprecated use |gitsigns.stage_hunk()| on staged signs
 --- Undo the last call of stage_hunk().
 ---
 --- Note: only the calls to stage_hunk() performed in the current
@@ -400,7 +426,7 @@ end
 ---
 --- Attributes: ~
 ---     {async}
-M.undo_stage_hunk = async.create(function()
+M.undo_stage_hunk = async.create(0, function()
   local bufnr = current_buf()
   local bcache = cache[bufnr]
   if not bcache then
@@ -431,7 +457,7 @@ end)
 ---
 --- Attributes: ~
 ---     {async}
-M.stage_buffer = async.create(function()
+M.stage_buffer = async.create(0, function()
   local bufnr = current_buf()
   local bcache = cache[bufnr]
   if not bcache then
@@ -475,7 +501,7 @@ end)
 ---
 --- Attributes: ~
 ---     {async}
-M.reset_buffer_index = async.create(function()
+M.reset_buffer_index = async.create(0, function()
   local bufnr = current_buf()
   local bcache = cache[bufnr]
   if not bcache then
@@ -857,6 +883,7 @@ local function feedkeys(keys)
   api.nvim_feedkeys(cy, 'n', false)
 end
 
+--- @async
 --- @param bufnr integer
 --- @param greedy? boolean
 --- @return Gitsigns.Hunk.Hunk? hunk
@@ -874,7 +901,7 @@ local function get_hunk_with_staged(bufnr, greedy)
 end
 
 --- Preview the hunk at the cursor position inline in the buffer.
-M.preview_hunk_inline = async.create(function()
+M.preview_hunk_inline = async.create(0, function()
   local bufnr = current_buf()
 
   local hunk, staged = get_hunk_with_staged(bufnr, true)
@@ -887,12 +914,8 @@ M.preview_hunk_inline = async.create(function()
 
   local winid --- @type integer
   manager.show_added(bufnr, ns_inline, hunk)
-  if config._inline2 then
-    if hunk.removed.count > 0 then
-      winid = manager.show_deleted_in_float(bufnr, ns_inline, hunk, staged)
-    end
-  else
-    manager.show_deleted(bufnr, ns_inline, hunk)
+  if hunk.removed.count > 0 then
+    winid = manager.show_deleted_in_float(bufnr, ns_inline, hunk, staged)
   end
 
   api.nvim_create_autocmd({ 'CursorMoved', 'InsertEnter' }, {
@@ -915,13 +938,31 @@ M.preview_hunk_inline = async.create(function()
 end)
 
 --- Select the hunk under the cursor.
-M.select_hunk = function()
-  local hunk = get_cursor_hunk()
+---
+--- @param opts table|nil Additional options:
+---             • {greedy}: (boolean)
+---               Select all contiguous hunks. Only useful if 'diff_opts'
+---               contains `linematch`. Defaults to `true`.
+M.select_hunk = function(opts)
+  local bufnr = current_buf()
+  opts = opts or {}
+
+  local hunk --- @type Gitsigns.Hunk.Hunk?
+  async
+    .arun(function()
+      hunk = get_hunk(bufnr, nil, opts.greedy ~= false)
+    end)
+    :wait()
+
   if not hunk then
     return
   end
 
-  vim.cmd('normal! ' .. hunk.added.start .. 'GV' .. hunk.vend .. 'G')
+  if vim.fn.mode():find('v') ~= nil then
+    vim.cmd('normal! ' .. hunk.added.start .. 'GoV' .. hunk.vend .. 'G')
+  else
+    vim.cmd('normal! ' .. hunk.added.start .. 'GV' .. hunk.vend .. 'G')
+  end
 end
 
 --- Get hunk array for specified buffer.
@@ -1114,7 +1155,7 @@ end
 local function update_buf_base(bcache, base)
   bcache.file_mode = base == 'FILE'
   if not bcache.file_mode then
-    bcache.git_obj:update_revision(base)
+    bcache.git_obj:update(base)
   end
   bcache:invalidate(true)
   update(bcache.bufnr)
@@ -1353,7 +1394,7 @@ local function buildqflist(target)
             obj = ':0:' .. f
           end
           local a = r:get_show_text(obj)
-          async.scheduler()
+          async.schedule()
           local hunks = run_diff(a, util.file_lines(f_abs))
           hunks_to_qflist(f_abs, hunks, qflist)
         end
@@ -1398,7 +1439,7 @@ M.setqflist = async.create(2, function(target, opts)
     items = buildqflist(target),
     title = 'Hunks',
   }
-  async.scheduler()
+  async.schedule()
   if opts.use_location_list then
     local nr = opts.nr or 0
     vim.fn.setloclist(nr, {}, ' ', qfopts)
@@ -1502,7 +1543,7 @@ end
 ---
 --- Attributes: ~
 ---     {async}
-M.refresh = async.create(function()
+M.refresh = async.create(0, function()
   manager.reset_signs()
   require('gitsigns.highlight').setup_highlights()
   require('gitsigns.current_line_blame').setup()
