@@ -315,7 +315,7 @@ local function pmap(mode, lhs, cb, opts)
 end
 
 --- @async
-function M.blame()
+function M.blame(print_type)
   local __FUNC__ = 'blame'
   local bufnr = api.nvim_get_current_buf()
   local win = api.nvim_get_current_win()
