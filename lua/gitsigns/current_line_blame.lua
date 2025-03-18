@@ -33,7 +33,7 @@ local function expand_blame_format(fmt, name, info)
   return util.expand_format(fmt, info)
 end
 
---- @param virt_text {[1]: string, [2]: string}[]
+--- @param virt_text [string, string][]
 --- @return string
 local function flatten_virt_text(virt_text)
   local res = {} ---@type string[]
@@ -220,7 +220,9 @@ function M.setup()
   end
 
   local opts = config.current_line_blame_opts
-  M.update = debounce.debounce_trailing(opts.delay, update)
+  -- TODO(lewis6991): opts.delay is always defined as the schema set
+  -- deep_extend=true
+  M.update = debounce.debounce_trailing(assert(opts.delay), update)
 
   -- show current buffer line blame immediately
   M.update(api.nvim_get_current_buf())
